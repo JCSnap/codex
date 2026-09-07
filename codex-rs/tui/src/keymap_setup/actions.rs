@@ -216,7 +216,7 @@ pub(super) const KEYMAP_ACTIONS: &[KeymapActionDescriptor] = &[
     action("agents", "Agents", "search", "Search the available agent tasks."),
     action("agents", "Agents", "new_task", "Start composing a new agent task."),
     action("agents", "Agents", "rename", "Rename the selected task."),
-    action("agents", "Agents", "stop", "Stop the selected running task."),
+    action("agents", "Agents", "stop", "Archive the selected task after inline confirmation."),
     action("agents", "Agents", "toggle_grouping", "Group tasks by status or project."),
     action("approval", "Approval", "open_fullscreen", "Open approval details fullscreen."),
     action("approval", "Approval", "open_thread", "Open the approval source thread when available."),

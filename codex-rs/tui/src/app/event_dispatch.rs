@@ -2741,8 +2741,8 @@ impl App {
                     }
                 }
             }
-            AppEvent::StopAgentsOverviewThread { thread_id } => {
-                self.stop_agents_overview_thread(app_server, thread_id)
+            AppEvent::ArchiveAgentsOverviewThread { thread_id } => {
+                self.archive_agents_overview_thread(app_server, thread_id)
                     .await;
             }
             #[cfg(any(unix, windows))]

@@ -132,6 +132,7 @@ pub(super) struct AgentsOverviewViewState {
     pub(super) key_chord_hint: Option<Vec<(String, String)>>,
     pub(super) focus: AgentsOverviewFocus,
     pub(super) connection_notice: Option<&'static str>,
+    pending_archive: Option<ThreadId>,
     search: String,
     searching: bool,
     pub(super) status_grouping: bool,
@@ -149,6 +150,7 @@ pub(super) enum AgentsOverviewFocus {
 
 impl AgentsOverviewViewState {
     pub(super) fn focus_composer(&mut self) {
+        self.pending_archive = None;
         self.focus = AgentsOverviewFocus::Composer;
         if let Some(composer) = self.composer.as_mut() {
             composer.resume_text_entry();
@@ -233,6 +235,10 @@ impl AgentsOverviewView {
         let visible = view.visible_indices();
         if !visible.contains(&view.selected) {
             view.selected = visible.first().copied().unwrap_or(usize::MAX);
+        }
+        let selected_thread_id = view.selected_row().map(|row| row.thread_id);
+        if view.state().pending_archive != selected_thread_id {
+            view.state().pending_archive = None;
         }
         view
     }
@@ -550,6 +556,9 @@ impl BottomPaneView for AgentsOverviewView {
 
     fn on_ctrl_c(&mut self) -> CancellationEvent {
         let mut state = self.state();
+        if state.pending_archive.take().is_some() {
+            return CancellationEvent::Handled;
+        }
         if state.editing_metadata() {
             state.searching = false;
             state.renaming = false;
@@ -568,6 +577,7 @@ impl BottomPaneView for AgentsOverviewView {
     }
 
     fn handle_paste(&mut self, pasted: String) -> bool {
+        self.state().pending_archive = None;
         if self.state().editing_metadata() {
             return self.edit_input(|input| {
                 input.push_str(&crate::history_cell::sanitize_user_text(pasted.into()))
@@ -601,8 +611,19 @@ impl BottomPaneView for AgentsOverviewView {
         if key.kind == crossterm::event::KeyEventKind::Release {
             return;
         }
+        if !self.agents_keymap.stop.is_pressed(key) {
+            let pending = self.state().pending_archive.take();
+            if pending.is_some() && self.keymap.action_for(key) == Some(ListAction::Cancel) {
+                return;
+            }
+        }
         if self.state().composing() {
             self.handle_composer_key(key);
+            return;
+        }
+        if key.kind == crossterm::event::KeyEventKind::Repeat
+            && self.agents_keymap.stop.is_pressed(key)
+        {
             return;
         }
         if key.code == KeyCode::Backspace
@@ -690,12 +711,17 @@ impl BottomPaneView for AgentsOverviewView {
             return;
         }
         if self.agents_keymap.stop.is_pressed(key) {
-            if let Some(row) = self.selected_row()
-                && matches!(row.thread.status, ThreadStatus::Active { .. })
-            {
-                self.app_event_tx.send(AppEvent::StopAgentsOverviewThread {
-                    thread_id: row.thread_id,
-                });
+            if let Some(row) = self.selected_row() {
+                let mut state = self.state();
+                if state.pending_archive == Some(row.thread_id) {
+                    state.pending_archive = None;
+                    self.app_event_tx
+                        .send(AppEvent::ArchiveAgentsOverviewThread {
+                            thread_id: row.thread_id,
+                        });
+                } else {
+                    state.pending_archive = Some(row.thread_id);
+                }
             }
             return;
         }

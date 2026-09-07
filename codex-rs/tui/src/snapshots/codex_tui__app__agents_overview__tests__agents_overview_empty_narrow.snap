@@ -25,4 +25,4 @@ expression: "render_bottom_popup(&app.chat_widget, 48)"
 
   ↑↓ navigate ctrl+o resume enter open ctrl+n
   new task ctrl+f search ctrl+s group ctrl+r
-  rename ctrl+x stop esc back
+  rename ctrl+x archive esc back

@@ -1283,9 +1283,11 @@ async fn filtered_dashboard_actions_use_configured_shortcuts() {
     ));
     assert!(!view.is_complete());
     view.handle_key_event(KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE));
+    assert!(event_rx.try_recv().is_err());
+    view.handle_key_event(KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE));
     assert!(matches!(
         event_rx.try_recv(),
-        Ok(AppEvent::StopAgentsOverviewThread { thread_id }) if thread_id == second
+        Ok(AppEvent::ArchiveAgentsOverviewThread { thread_id }) if thread_id == second
     ));
     view.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(matches!(
@@ -2047,4 +2049,113 @@ async fn command_center_handles_resume_failure_and_success() -> Result<()> {
     );
     server.shutdown().await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn archive_requires_two_presses_on_the_same_session() {
+    let mut app = make_test_app().await;
+    let first = ThreadId::new();
+    let second = ThreadId::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    app.app_event_tx = crate::app_event_sender::AppEventSender::new(tx);
+    let mut view = app.agents_overview_view(
+        vec![
+            overview_thread(
+                first,
+                /*parent_thread_id*/ None,
+                "First task",
+                ThreadStatus::Idle,
+            ),
+            overview_thread(
+                second,
+                /*parent_thread_id*/ None,
+                "Second task",
+                ThreadStatus::NotLoaded,
+            ),
+        ],
+        Some(first),
+    );
+    // Escape moves focus from the new-task composer to the session list.
+    view.handle_key_event(KeyCode::Esc.into());
+    let archive = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+    view.handle_key_event(archive);
+    assert!(rx.try_recv().is_err());
+    let area = Rect::new(
+        /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 24,
+    );
+    let mut buffer = ratatui::buffer::Buffer::empty(area);
+    view.render(area, &mut buffer);
+    let confirmation = buffer
+        .content
+        .chunks(100)
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        })
+        .find(|line| line.contains("Archive session?"))
+        .expect("inline archive confirmation");
+    insta::assert_snapshot!(confirmation.trim(), @"Archive session? Press ctrl+x again to confirm. History is kept. Esc cancels.");
+    view.handle_key_event(KeyEvent {
+        kind: crossterm::event::KeyEventKind::Repeat,
+        ..archive
+    });
+    assert!(rx.try_recv().is_err());
+    view.handle_key_event(KeyCode::Esc.into());
+    assert!(!view.is_complete());
+    view.handle_key_event(archive);
+    assert!(rx.try_recv().is_err());
+    view.handle_key_event(KeyCode::Down.into());
+    view.handle_key_event(archive);
+    assert!(rx.try_recv().is_err());
+    view.handle_key_event(archive);
+    assert!(
+        matches!(rx.try_recv(), Ok(AppEvent::ArchiveAgentsOverviewThread { thread_id }) if thread_id == second)
+    );
+    assert!(!view.is_complete());
+}
+
+#[tokio::test]
+async fn archive_confirmation_tracks_session_identity_across_refreshes() {
+    let mut app = make_test_app().await;
+    let first = ThreadId::new();
+    let second = ThreadId::new();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    app.app_event_tx = crate::app_event_sender::AppEventSender::new(tx);
+    let threads = vec![
+        overview_thread(
+            first,
+            /*parent_thread_id*/ None,
+            "First",
+            ThreadStatus::Idle,
+        ),
+        overview_thread(
+            second,
+            /*parent_thread_id*/ None,
+            "Second",
+            ThreadStatus::Idle,
+        ),
+    ];
+    let archive = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+    let mut view = app.agents_overview_view(threads.clone(), Some(first));
+    view.handle_key_event(KeyCode::Esc.into());
+    view.handle_key_event(archive);
+    let mut view = app.agents_overview_view(threads.clone(), Some(first));
+    view.handle_key_event(archive);
+    assert!(
+        matches!(rx.try_recv(), Ok(AppEvent::ArchiveAgentsOverviewThread { thread_id }) if thread_id == first)
+    );
+
+    view.handle_key_event(archive);
+    let mut view = app.agents_overview_view(threads.clone(), Some(second));
+    view.handle_key_event(archive);
+    assert!(rx.try_recv().is_err());
+
+    let mut view = app.agents_overview_view(vec![threads[0].clone()], Some(second));
+    view.handle_key_event(archive);
+    assert!(rx.try_recv().is_err());
+    view.handle_key_event(archive);
+    assert!(
+        matches!(rx.try_recv(), Ok(AppEvent::ArchiveAgentsOverviewThread { thread_id }) if thread_id == first)
+    );
 }
