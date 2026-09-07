@@ -13,6 +13,17 @@ impl AgentsOverviewView {
                     .into(),
             ];
         }
+        if self.state().pending_archive.is_some()
+            && let Some(hint) = self
+                .agents_keymap
+                .primary_hint("stop", &self.agents_keymap.stop)
+        {
+            let key = hint.display_label().replace(" + ", "+");
+            return crate::wrapping::word_wrap_lines(
+                [Line::from(format!("Archive session? Press {key} again to confirm. History is kept. Esc cancels.").yellow())],
+                usize::from(width),
+            );
+        }
         let list_hint = |action| {
             self.keymap.primary_hint(action).filter(|hint| {
                 !matches!(hint, ShortcutHint::Single(binding)
@@ -91,9 +102,8 @@ impl AgentsOverviewView {
         add_hint(
             self.agents_keymap
                 .primary_hint("stop", &self.agents_keymap.stop),
-            "stop",
-            self.selected_row()
-                .is_some_and(|row| matches!(row.thread.status, ThreadStatus::Active { .. })),
+            "archive",
+            self.selected_row().is_some(),
         );
         add_hint(list_hint(ListAction::Cancel), "back", true);
         let mut footer_line: Line = footer_spans.into();

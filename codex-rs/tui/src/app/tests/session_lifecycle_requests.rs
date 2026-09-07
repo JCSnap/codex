@@ -2511,60 +2511,6 @@ async fn paginated_workflows_never_request_full_thread_history() -> Result<()> {
 }
 
 #[tokio::test]
-async fn agents_overview_stop_uses_history_mode_for_turn_lookup() -> Result<()> {
-    let (mut app, _codex_home) = make_history_test_app().await?;
-    let paginated_thread_id = create_history_rollout(
-        &app.config,
-        ThreadHistoryMode::Paginated,
-        "paginated background task",
-    )?;
-    let cases = [
-        (paginated_thread_id, vec![false], 1),
-        (
-            create_history_rollout(
-                &app.config,
-                ThreadHistoryMode::Legacy,
-                "legacy background task",
-            )?,
-            vec![false, true],
-            0,
-        ),
-    ];
-    let (mut app_server, requests, proxy) = start_recording_app_server_with_history(
-        &app.config,
-        HistoryCapabilities::Current,
-        /*blocked_thread_list*/ None,
-        /*failed_thread_name*/ None,
-        crate::app_server_session::ThreadParamsMode::Embedded,
-        LoaderOverrides::default(),
-    )
-    .await?;
-
-    for (thread_id, expected_include_turns, expected_turn_page_count) in cases {
-        let previous_reads = recorded_params(&requests, "thread/read");
-        let previous_turn_page_count = recorded_params(&requests, "thread/turns/list").len();
-
-        app.stop_agents_overview_thread(&mut app_server, thread_id)
-            .await;
-
-        let reads = recorded_params(&requests, "thread/read");
-        let include_turns = reads[previous_reads.len()..]
-            .iter()
-            .map(|params| params["includeTurns"].as_bool().unwrap_or(false))
-            .collect::<Vec<_>>();
-        assert_eq!(include_turns, expected_include_turns);
-        assert_eq!(
-            recorded_params(&requests, "thread/turns/list").len() - previous_turn_page_count,
-            expected_turn_page_count
-        );
-    }
-
-    app_server.shutdown().await?;
-    proxy.await??;
-    Ok(())
-}
-
-#[tokio::test]
 async fn agents_overview_seeds_loaded_threads_when_recent_listing_is_unavailable() -> Result<()> {
     for (capabilities, expected_sort_keys) in [
         (
@@ -2648,7 +2594,7 @@ async fn agents_overview_seeds_loaded_threads_when_recent_listing_is_unavailable
 }
 
 #[tokio::test]
-async fn agents_overview_stop_uses_full_history_after_legacy_negotiation() -> Result<()> {
+async fn agents_overview_archive_preserves_history() -> Result<()> {
     let (mut app, _codex_home) = make_history_test_app().await?;
     let thread_id = create_history_rollout(
         &app.config,
@@ -2666,15 +2612,16 @@ async fn agents_overview_stop_uses_full_history_after_legacy_negotiation() -> Re
     .await?;
     app_server.start_thread(&app.config).await?;
 
-    app.stop_agents_overview_thread(&mut app_server, thread_id)
+    app.archive_agents_overview_thread(&mut app_server, thread_id)
         .await;
 
-    let include_turns = recorded_params(&requests, "thread/read")
-        .into_iter()
-        .map(|params| params["includeTurns"].as_bool().unwrap_or(false))
-        .collect::<Vec<_>>();
-    assert_eq!(include_turns, vec![false, true]);
-    assert!(recorded_params(&requests, "thread/turns/list").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "thread/archive"),
+        vec![serde_json::json!({"threadId": thread_id.to_string()})]
+    );
+    let restored = app_server.thread_unarchive(thread_id).await?;
+    assert_eq!(restored.id, thread_id.to_string());
+    assert_eq!(restored.preview, "paginated background task");
 
     app_server.shutdown().await?;
     proxy.await??;

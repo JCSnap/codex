@@ -305,8 +305,8 @@ pub(crate) enum AppEvent {
         destination: ThreadTitleDestination,
         result: Result<String, String>,
     },
-    /// Interrupt a task directly from the shared dashboard.
-    StopAgentsOverviewThread {
+    /// Archive a task directly from the shared dashboard.
+    ArchiveAgentsOverviewThread {
         thread_id: ThreadId,
     },
     /// Start the shared app-server daemon without moving the current embedded session.
